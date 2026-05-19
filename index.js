@@ -5,9 +5,8 @@ const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const path = require('path');
 
-// සෙෂන්ස් සහ ග්ලෝබල් දත්ත
+// සෙෂන්ස් ගබඩාව
 global.movieSessions = {};
-global.baiscopeSessions = {};
 
 async function startApexBot() {
     const { state, saveCreds } = await useMultiFileAuthState('session');
@@ -51,20 +50,21 @@ async function startApexBot() {
         const command = args[0].startsWith('.') ? args[0].slice(1).toLowerCase() : '';
         const cmdArgs = args.slice(1).join(' ');
 
-        // 1. ප්ලගින් එකක් නම් (උදා: .menu, .cinesubz, .baiscope)
+        // මෙනු කමාන්ඩ් එක හෝ ප්ලගින්ස්
         if (command && plugins[command]) {
             await plugins[command]({ sock, from, msg, args: cmdArgs });
         }
-        // 2. අංක 2 (Download Menu) ගැහුවොත්
+        // අංක 2 ගැහුවොත් ඩවුන්ලෝඩ් මෙනුව
         else if (text.trim() === '2') {
-             await sock.sendMessage(from, { text: "📥 *Download Menu*\n\n1️⃣ `.cinesubz [නම]`\n2️⃣ `.baiscope [නම]`\n\n_අවශ්‍ය එක තෝරා රිප්ලයි කරන්න._" });
+             await sock.sendMessage(from, { text: "📥 *Download Menu*\n\n1️⃣ `.moviepro`\n2️⃣ `.sinhalasub`\n3️⃣ `.sublk`\n4️⃣ `.animeclub`\n5️⃣ `.animehaven`\n6️⃣ `.zoomlk`\n\n_අවශ්‍ය සයිට් එක තෝරා `.සයිට්_නම චිත්‍රපට_නම` ලෙස ලබාදෙන්න._" });
         }
-        // 3. බයිස්කෝප් හෝ සිනෙසබ් සෙෂන් එකක් නම්
-        else if (!command && global.baiscopeSessions && global.baiscopeSessions[from]) {
-            await plugins['baiscope']({ sock, from, msg, args: '' });
-        }
+        // සයිට් වල නම්බර් රිප්ලයි කිරීම් සඳහා (movies ප්ලගින් එකට යොමු කිරීම)
         else if (!command && global.movieSessions && global.movieSessions[from]) {
-            await plugins['cinesubz']({ sock, from, msg, args: '' });
+            await plugins['movies']({ sock, from, msg, args: '' });
+        }
+        // අලුත් සයිට්ස් ටික හැන්ඩ්ල් කිරීම
+        else if (['cinesubz' , 'moviepro', 'sinhalasub', 'sublk', 'animeclub', 'animehaven', 'zoomlk'].includes(command)) {
+            await plugins['movies']({ sock, from, msg, args: cmdArgs });
         }
     });
 }
