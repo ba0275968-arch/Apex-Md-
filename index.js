@@ -5,6 +5,7 @@ const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const path = require('path');
 
+// සෙෂන්ස් සහ ග්ලෝබල් දත්ත
 global.movieSessions = {};
 global.baiscopeSessions = {};
 
@@ -50,9 +51,15 @@ async function startApexBot() {
         const command = args[0].startsWith('.') ? args[0].slice(1).toLowerCase() : '';
         const cmdArgs = args.slice(1).join(' ');
 
+        // 1. ප්ලගින් එකක් නම් (උදා: .menu, .cinesubz, .baiscope)
         if (command && plugins[command]) {
             await plugins[command]({ sock, from, msg, args: cmdArgs });
-        } 
+        }
+        // 2. අංක 2 (Download Menu) ගැහුවොත්
+        else if (text.trim() === '2') {
+             await sock.sendMessage(from, { text: "📥 *Download Menu*\n\n1️⃣ `.cinesubz [නම]`\n2️⃣ `.baiscope [නම]`\n\n_අවශ්‍ය එක තෝරා රිප්ලයි කරන්න._" });
+        }
+        // 3. බයිස්කෝප් හෝ සිනෙසබ් සෙෂන් එකක් නම්
         else if (!command && global.baiscopeSessions && global.baiscopeSessions[from]) {
             await plugins['baiscope']({ sock, from, msg, args: '' });
         }
