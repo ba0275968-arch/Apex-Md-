@@ -5,8 +5,8 @@ const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const path = require('path');
 
-// සෙෂන් එක තියාගන්න ග්ලෝබල් එකක්
 global.movieSessions = {};
+global.baiscopeSessions = {};
 
 async function startApexBot() {
     const { state, saveCreds } = await useMultiFileAuthState('session');
@@ -50,12 +50,13 @@ async function startApexBot() {
         const command = args[0].startsWith('.') ? args[0].slice(1).toLowerCase() : '';
         const cmdArgs = args.slice(1).join(' ');
 
-        // ප්ලගින් එකක් නම්
         if (command && plugins[command]) {
             await plugins[command]({ sock, from, msg, args: cmdArgs });
         } 
-        // නම්බර් එකක් රිප්ලයි කරා නම් (Session එකක් තියෙනවා නම්)
-        else if (!command && global.movieSessions[from]) {
+        else if (!command && global.baiscopeSessions && global.baiscopeSessions[from]) {
+            await plugins['baiscope']({ sock, from, msg, args: '' });
+        }
+        else if (!command && global.movieSessions && global.movieSessions[from]) {
             await plugins['cinesubz']({ sock, from, msg, args: '' });
         }
     });
