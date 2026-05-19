@@ -5,6 +5,9 @@ const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const path = require('path');
 
+// සෙෂන් එක තියාගන්න ග්ලෝබල් එකක්
+global.movieSessions = {};
+
 async function startApexBot() {
     const { state, saveCreds } = await useMultiFileAuthState('session');
 
@@ -16,33 +19,23 @@ async function startApexBot() {
 
     sock.ev.on('creds.update', saveCreds);
 
-    // ප්ලගින්ස් ලෝඩ් කරන කොටස
     const plugins = {};
     const pluginsDir = path.join(__dirname, 'plugins');
-    
-    if (!fs.existsSync(pluginsDir)){
-        fs.mkdirSync(pluginsDir);
-    }
+    if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
 
-    // ෆෝල්ඩර් එකේ තියෙන හැම js ෆයිල් එකක්ම කියවීම
     const pluginFiles = fs.readdirSync(pluginsDir).filter(file => file.endsWith('.js'));
     for (const file of pluginFiles) {
-        const commandName = file.replace('.js', '');
-        plugins[commandName] = require(path.join(pluginsDir, file));
-        console.log(`📁 Loaded Plugin: .${commandName}`);
+        plugins[file.replace('.js', '')] = require(path.join(pluginsDir, file));
     }
 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
-        if(qr) {
-            console.log('⚡ Apex-MD QR Code එක ස්කෑන් කරන්න:');
-            qrcode.generate(qr, { small: true });
-        }
+        if(qr) qrcode.generate(qr, { small: true });
         if (connection === 'close') {
             const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
             if (shouldReconnect) startApexBot();
         } else if (connection === 'open') {
-            console.log('🟩 Apex-MD Plugins සමඟ සාර්ථකව සක්‍රීය වුණා!');
+            console.log('🟩 Apex-MD Fully Active!');
         }
     });
 
@@ -51,24 +44,21 @@ async function startApexBot() {
         if (!msg.message || msg.key.fromMe) return;
 
         const from = msg.key.remoteJid;
-        const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
-        
-        if (!text || !text.startsWith('.')) return;
+        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
         
         const args = text.split(' ');
-        const command = args[0].slice(1).toLowerCase(); // . අයින් කරලා කමාන්ඩ් එක විතරක් ගැනීම
+        const command = args[0].startsWith('.') ? args[0].slice(1).toLowerCase() : '';
         const cmdArgs = args.slice(1).join(' ');
 
-        // ප්ලගින් එකක් තියෙනවා නම් ඒක රන් කිරීම
-        if (plugins[command]) {
-            try {
-                await plugins[command]({ sock, from, msg, args: cmdArgs });
-            } catch (err) {
-                console.error(err);
-                await sock.sendMessage(from, { text: '❌ මෙම කමාන්ඩ් එක ක්‍රියාත්මක කිරීමේදී දෝෂයක් ඇති විය.' });
-            }
+        // ප්ලගින් එකක් නම්
+        if (command && plugins[command]) {
+            await plugins[command]({ sock, from, msg, args: cmdArgs });
+        } 
+        // නම්බර් එකක් රිප්ලයි කරා නම් (Session එකක් තියෙනවා නම්)
+        else if (!command && global.movieSessions[from]) {
+            await plugins['cinesubz']({ sock, from, msg, args: '' });
         }
     });
 }
 
-startApexBot(); 
+startApexBot();
