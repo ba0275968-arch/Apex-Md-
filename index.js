@@ -1,72 +1,106 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
-const { Boom } = require('@hapi/boom');
-const pino = require('pino');
-const qrcode = require('qrcode-terminal');
-const fs = require('fs');
-const path = require('path');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, jidDecode, fetchLatestBaileysVersion, generateForwardMessageContent, prepareWAMessageMedia, generateWAMessageFromContent, generateMessageID, downloadContentFromMessage, makeInMemoryStore, jidNormalizedUser } = require('@whiskeysockets/baileys')
+const { state, saveCreds } = useMultiFileAuthState(__dirname + '/auth_info_baileys/')
+const { smsg, isUrl, generateWAMessage } = require('./lib/tiny')
+const axios = require('axios')
+const fs = require('fs')
+const pino = require('pino')
+const path = require('path')
+const express = require('express')
+const app = express()
+const port = process.env.PORT || 8000
 
-// සෙෂන්ස් ගබඩාව
-global.movieSessions = {};
+// === ප්ලගින් සිස්ටම් එක හඳුන්වා දීම ===
+const { cmd, commands } = require('./command')
 
-async function startApexBot() {
-    const { state, saveCreds } = await useMultiFileAuthState('session');
+// 📂 පැරණි ප්ලගින්ස් ටික රික්වයර් කිරීම
+require('./plugins/alive')
+require('./plugins/song')
+require('./plugins/menu')
+require('./plugins/baiscope')
+require('./plugins/cinesubz')
 
-    const sock = makeWASocket({
-        logger: pino({ level: 'silent' }),
-        printQRInTerminal: true,
-        auth: state
-    });
+// 🔥 අලුතින්ම එකතු කරපු සයිට් 8හි ප්ලගින්ස් ටික
+require('./plugins/moviepro')
+require('./plugins/cartoonslk')
+require('./plugins/animost')
+require('./plugins/sinhalacartoons')
+require('./plugins/sublk')
+require('./plugins/zoomlk')
+require('./plugins/animeclub')
+require('./plugins/sinhalasub')
 
-    sock.ev.on('creds.update', saveCreds);
+app.get('/', (req, res) => {
+  res.send('Apex-MD WhatsApp Bot is Running Successfully!')
+})
 
-    const plugins = {};
-    const pluginsDir = path.join(__dirname, 'plugins');
-    if (!fs.existsSync(pluginsDir)) fs.mkdirSync(pluginsDir);
+app.listen(port, () => {
+  console.log(`Server is running on port ${port}`)
+})
 
-    const pluginFiles = fs.readdirSync(pluginsDir).filter(file => file.endsWith('.js'));
-    for (const file of pluginFiles) {
-        plugins[file.replace('.js', '')] = require(path.join(pluginsDir, file));
+async function startBot() {
+  const { version, isLatest } = await fetchLatestBaileysVersion()
+  console.log(`Using Baileys v${version.join('.')}, isLatest: ${isLatest}`)
+
+  const sock = makeWASocket({
+    logger: pino({ level: 'silent' }),
+    printQRInTerminal: true,
+    auth: state
+  })
+
+  sock.ev.on('creds.update', saveCreds)
+
+  sock.ev.on('connection.update', (update) => {
+    const { connection, lastDisconnect } = update
+    if (connection === 'close') {
+      const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut
+      console.log('Connection closed due to ', lastDisconnect.error, ', reconnecting ', shouldReconnect)
+      if (shouldReconnect) {
+        startBot()
+      }
+    } else if (connection === 'open') {
+      console.log('Apex-MD Connected Successfully! ✅')
     }
+  })
 
-    sock.ev.on('connection.update', (update) => {
-        const { connection, lastDisconnect, qr } = update;
-        if(qr) qrcode.generate(qr, { small: true });
-        if (connection === 'close') {
-            const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
-            if (shouldReconnect) startApexBot();
-        } else if (connection === 'open') {
-            console.log('🟩 Apex-MD Fully Active!');
-        }
-    });
+  sock.ev.on('messages.upsert', async (chatUpdate) => {
+    try {
+      let mek = chatUpdate.messages[0]
+      if (!mek.message) return
+      mek.message = (Object.keys(mek.message)[0] === 'ephemeralMessage') ? mek.message.ephemeralMessage.message : mek.message
+      if (mek.key && mek.key.remoteJid === 'status@broadcast') return
+      let m = smsg(sock, mek, store)
+      let from = m.key.remoteJid
+      let type = Object.keys(mek.message)[0]
+      let body = (type === 'conversation') ? mek.message.conversation : (type === 'extendedTextMessage') ? mek.message.extendedTextMessage.text : (type === 'imageMessage') && mek.message.imageMessage.caption ? mek.message.imageMessage.caption : (type === 'videoMessage') && mek.message.videoMessage.caption ? mek.message.videoMessage.caption : ''
+      
+      let isCmd = body.startsWith('.')
+      let command = isCmd ? body.slice(1).trim().split(/ +/).shift().toLowerCase() : ''
+      let args = body.trim().split(/ +/).slice(1).join(' ')
 
-    sock.ev.on('messages.upsert', async (m) => {
-        const msg = m.messages[0];
-        if (!msg.message || msg.key.fromMe) return;
+      // ප්ලගින් එකක් ඇතුළේ තියෙන හැම කමාන්ඩ් එකක්ම ක්‍රියාත්මක කිරීම
+      const events = commands.find((cmd) => cmd.pattern === command) || commands.find((cmd) => cmd.alias && cmd.alias.includes(command))
+      
+      // හැම ප්ලගින් එකකටම අවශ්‍ය variables ටික පාස් කිරීම
+      if (events) {
+         await events.function(sock, from, m, mek, { args, text: args, body, isCmd, command, reply: async (text) => await sock.sendMessage(from, { text: text }, { quoted: m }) })
+      }
 
-        const from = msg.key.remoteJid;
-        const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
-        
-        const args = text.split(' ');
-        const command = args[0].startsWith('.') ? args[0].slice(1).toLowerCase() : '';
-        const cmdArgs = args.slice(1).join(' ');
+      // අංක රිප්ලයි කරන සිස්ටම් එක වැඩ කිරීමට (Session Listener)
+      const allPlugins = ['moviepro', 'cartoonslk', 'animost', 'sinhalacartoons', 'sublk', 'zoomlk', 'animeclub', 'sinhalasub']
+      for (const pl of allPlugins) {
+         try {
+             const pluginFunc = require(`./plugins/${pl}`)
+             await pluginFunc({ sock, from, msg: mek, args })
+         } catch (e) {
+             // ඉග්නෝර් කරන්න
+         }
+      }
 
-        // මෙනු කමාන්ඩ් එක හෝ ප්ලගින්ස්
-        if (command && plugins[command]) {
-            await plugins[command]({ sock, from, msg, args: cmdArgs });
-        }
-        // අංක 2 ගැහුවොත් ඩවුන්ලෝඩ් මෙනුව
-        else if (text.trim() === '2') {
-             await sock.sendMessage(from, { text: "📥 *Download Menu*\n\n1️⃣ `.moviepro`\n2️⃣ `.sinhalasub`\n3️⃣ `.sublk`\n4️⃣ `.animeclub`\n5️⃣ `.animehaven`\n6️⃣ `.zoomlk`\n\n_අවශ්‍ය සයිට් එක තෝරා `.සයිට්_නම චිත්‍රපට_නම` ලෙස ලබාදෙන්න._" });
-        }
-        // සයිට් වල නම්බර් රිප්ලයි කිරීම් සඳහා (movies ප්ලගින් එකට යොමු කිරීම)
-        else if (!command && global.movieSessions && global.movieSessions[from]) {
-            await plugins['movies']({ sock, from, msg, args: '' });
-        }
-        // අලුත් සයිට්ස් ටික හැන්ඩ්ල් කිරීම
-        else if (['cinesubz' , 'moviepro', 'sinhalasub', 'sublk', 'animeclub', 'animehaven', 'zoomlk'].includes(command)) {
-            await plugins['movies']({ sock, from, msg, args: cmdArgs });
-        }
-    });
+    } catch (err) {
+      console.log(err)
+    }
+  })
 }
 
-startApexBot();
+const store = makeInMemoryStore({ logger: pino().child({ level: 'silent', stream: 'store' }) })
+startBot()
